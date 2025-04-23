@@ -1,4 +1,4 @@
-package main
+package helm_tester
 
 import (
 	"context"
