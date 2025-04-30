@@ -204,7 +204,7 @@ func (h *HelmTester) JQValues(jq string) string {
 	return h.Chart.GetValue(jq).(string)
 }
 
-func (h *HelmTester) CheckPermisions(verb, resource, group, version, ns string) bool {
+func (h *HelmTester) CheckPermissions(verb, resource, group, version, ns string) bool {
 	sar := &authv1.SelfSubjectAccessReview{
 		Spec: authv1.SelfSubjectAccessReviewSpec{
 			ResourceAttributes: &authv1.ResourceAttributes{
