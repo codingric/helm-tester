@@ -17,12 +17,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/downloader"
+	"helm.sh/helm/v3/pkg/engine"
 	"helm.sh/helm/v3/pkg/getter"
 )
 
@@ -35,6 +37,8 @@ type HelmTester struct {
 	_pods_allowed       bool
 	_secrets_allowed    bool
 	_daemonsets_allowed bool
+
+	_rest_config *rest.Config
 }
 
 func NewHelmTester(helm_path string) *HelmTester {
@@ -54,10 +58,10 @@ func NewHelmTester(helm_path string) *HelmTester {
 	// Configure Kubes
 	kubeconfigpath := filepath.Join(os.Getenv("HOME"), ".kube", "config")
 	kubeconfig := clientcmd.GetConfigFromFileOrDie(kubeconfigpath)
-	k8sconfig, _ := clientcmd.BuildConfigFromFlags("", kubeconfigpath)
+	_rest_config, _ := clientcmd.BuildConfigFromFlags("", kubeconfigpath)
 	tester.ClusterName = strings.Split(kubeconfig.CurrentContext, "/")[1]
-	tester.Client, err = kubernetes.NewForConfig(k8sconfig)
-	tester.DynamicClient, _ = dynamic.NewForConfig(k8sconfig)
+	tester.Client, err = kubernetes.NewForConfig(_rest_config)
+	tester.DynamicClient, _ = dynamic.NewForConfig(_rest_config)
 
 	// Checking connectivity and correct permissions
 	if err != nil {
@@ -184,6 +188,11 @@ func (c *HelmChart) _DependenciesValues() []any {
 	return v
 }
 
+func (h *HelmTester) Render() (map[string]string, error) {
+	_e := engine.New(h._rest_config)
+	return _e.Render(h.Chart.Chart, h.Chart.Values)
+}
+
 func (c *HelmChart) GetValue(query string) any {
 	data := map[string]any{
 		"Chart":        c.Chart.Values,
@@ -251,7 +260,7 @@ func (h *HelmTester) AssertPodsUsingImage(t *testing.T, ns, labels, image string
 		return
 	}
 
-	assert.Greater(t, len(pods.Items), 0, "No pods")
+	assert.Greater(t, len(pods.Items), 0, "No matching pods found")
 
 	for _, pod := range pods.Items {
 		t.Run(
