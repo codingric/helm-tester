@@ -188,7 +188,7 @@ func (h *HelmTester) Render() (any, error) {
 	return m, nil
 }
 
-func (h *HelmTester) AssertQuery(t *testing.T, query string, msg string, args ...any) {
+func (h *HelmTester) AssertQueryTrue(t *testing.T, query string, msg string, args ...any) {
 	r, e := h.Query(query)
 	if assert.NoError(t, e, "Query error") {
 		assert.Equalf(t, "true", strings.TrimRight(r, "\n"), msg, args...)
