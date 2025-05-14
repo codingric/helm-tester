@@ -245,7 +245,7 @@ func (h *HelmTester) Query(query string) (string, error) {
 		return "", err
 	}
 
-	return result, nil
+	return strings.TrimRight(result, "\n"), nil
 }
 
 func (h *HelmTester) CheckPermissions(verb, resource, group, version, ns string) bool {
