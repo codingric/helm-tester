@@ -44,7 +44,7 @@ type HelmTester struct {
 	_rest_config *rest.Config
 
 	_rendered     any
-	_chart_values any
+	_chart_values chartutil.Values
 }
 
 func NewHelmTester(helm_path string) *HelmTester {
@@ -145,32 +145,6 @@ func GetDefaultValues(chartPath string) (map[string]interface{}, error) {
 	return chart.Values, nil
 }
 
-func _query(query string, data any) (r interface{}, e error) {
-	return
-}
-
-func _ToYamlNode(data any) (*yaml.Node, error) {
-	// Marshal to YAML bytes first
-	yamlBytes, err := yaml.Marshal(data)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal input to YAML: %w", err)
-	}
-
-	// Then decode into a yaml.Node
-	var node yaml.Node
-	err = yaml.Unmarshal(yamlBytes, &node)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal YAML node: %w", err)
-	}
-
-	// The parsed document is in node.Content[0]
-	if len(node.Content) == 0 {
-		return nil, fmt.Errorf("empty YAML content")
-	}
-
-	return node.Content[0], nil
-}
-
 type HelmChart struct {
 	*chart.Chart
 	Dependencies []*HelmChart
@@ -195,7 +169,7 @@ func (c *HelmChart) _DependenciesValues() []any {
 func (h *HelmTester) Render() (any, error) {
 	_e := engine.New(h._rest_config)
 	v, e := chartutil.ToRenderValues(h.Chart.Chart, h.Chart.Values, chartutil.ReleaseOptions{}, nil)
-	h._chart_values = v.AsMap()
+	h._chart_values = v
 	if e != nil {
 		return nil, e
 	}
@@ -214,6 +188,13 @@ func (h *HelmTester) Render() (any, error) {
 	return m, nil
 }
 
+func (h *HelmTester) AssertQuery(t *testing.T, query string, msg string, args ...any) {
+	r, e := h.Query(query)
+	if assert.NoError(t, e, "Query error") {
+		assert.Equalf(t, "true", strings.TrimRight(r, "\n"), msg, args...)
+	}
+}
+
 func (h *HelmTester) Query(query string) (string, error) {
 	if h._rendered == nil {
 		_, e := h.Render()
@@ -223,11 +204,9 @@ func (h *HelmTester) Query(query string) (string, error) {
 		}
 	}
 	data := map[string]any{
-		"Values": map[string]any{
-			"Chart":        h.Chart.Chart.Values,
-			"Dependencies": h.Chart._DependenciesValues(),
-		},
-		"Manifests": h._rendered,
+		"Chart":        h._chart_values.AsMap(),
+		"Dependencies": h.Chart._DependenciesValues(),
+		"Manifests":    h._rendered,
 	}
 
 	// data := map[string]any{"name": "ricardo"}
