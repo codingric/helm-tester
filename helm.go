@@ -10,8 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itchyny/gojq"
+	"github.com/mikefarah/yq/v4/pkg/yqlib"
 	"github.com/stretchr/testify/assert"
+	"gopkg.in/yaml.v3"
 	authv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,6 +23,7 @@ import (
 
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/chart/loader"
+	"helm.sh/helm/v3/pkg/chartutil"
 	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/downloader"
 	"helm.sh/helm/v3/pkg/engine"
@@ -39,6 +41,8 @@ type HelmTester struct {
 	_daemonsets_allowed bool
 
 	_rest_config *rest.Config
+
+	_rendered any
 }
 
 func NewHelmTester(helm_path string) *HelmTester {
@@ -139,32 +143,30 @@ func GetDefaultValues(chartPath string) (map[string]interface{}, error) {
 	return chart.Values, nil
 }
 
-func _query(query string, data any) (interface{}, error) {
+func _query(query string, data any) (r interface{}, e error) {
+	return
+}
 
-	jqQuery, err := gojq.Parse(query)
+func _ToYamlNode(data any) (*yaml.Node, error) {
+	// Marshal to YAML bytes first
+	yamlBytes, err := yaml.Marshal(data)
 	if err != nil {
-		return nil, fmt.Errorf("invalid query: %w", err)
+		return nil, fmt.Errorf("failed to marshal input to YAML: %w", err)
 	}
 
-	iter := jqQuery.Run(data)
-	var results []interface{}
-
-	for {
-		v, ok := iter.Next()
-		if !ok {
-			break
-		}
-		if err, isErr := v.(error); isErr {
-			return nil, fmt.Errorf("query execution error: %w", err)
-		}
-		results = append(results, v)
+	// Then decode into a yaml.Node
+	var node yaml.Node
+	err = yaml.Unmarshal(yamlBytes, &node)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal YAML node: %w", err)
 	}
 
-	if len(results) == 1 {
-		return results[0], nil
+	// The parsed document is in node.Content[0]
+	if len(node.Content) == 0 {
+		return nil, fmt.Errorf("empty YAML content")
 	}
 
-	return results, nil
+	return node.Content[0], nil
 }
 
 type HelmChart struct {
@@ -188,29 +190,60 @@ func (c *HelmChart) _DependenciesValues() []any {
 	return v
 }
 
-func (h *HelmTester) Render() (map[string]string, error) {
+func (h *HelmTester) Render() (any, error) {
 	_e := engine.New(h._rest_config)
-	return _e.Render(h.Chart.Chart, h.Chart.Values)
+	v, e := chartutil.ToRenderValues(h.Chart.Chart, h.Chart.Values, chartutil.ReleaseOptions{}, nil)
+	if e != nil {
+		return nil, e
+	}
+
+	r, e := _e.Render(h.Chart.Chart, v)
+	if e != nil {
+		return nil, e
+	}
+	m := map[string]any{}
+	for k, v := range r {
+		var d any
+		yaml.Unmarshal([]byte(v), &d)
+		m[k] = d
+	}
+	h._rendered = m
+	return m, nil
 }
 
-func (c *HelmChart) GetValue(query string) any {
+func (h *HelmTester) Query(query string) (string, error) {
+	if h._rendered == nil {
+		_, e := h.Render()
+		if e != nil {
+			log.Printf("Query render error: %s", e)
+			return "", e
+		}
+	}
 	data := map[string]any{
-		"Chart":        c.Chart.Values,
-		"Dependencies": c._DependenciesValues(),
+		"Values": map[string]any{
+			"Chart":        h.Chart.Chart.Values,
+			"Dependencies": h.Chart._DependenciesValues(),
+		},
+		"Manifests": h._rendered,
 	}
-	s, err := _query(query, data)
-	if err != nil {
-		return nil
-	}
-	// ss, ok := s.(string)
-	// if !ok {
-	// 	return nil
-	// }
-	return s
-}
 
-func (h *HelmTester) JQValues(jq string) string {
-	return h.Chart.GetValue(jq).(string)
+	// data := map[string]any{"name": "ricardo"}
+
+	yamlData, err := yaml.Marshal(data)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	_decoder := yqlib.NewYamlDecoder(yqlib.ConfiguredYamlPreferences)
+	_encoder := yqlib.NewYamlEncoder(yqlib.ConfiguredYamlPreferences)
+
+	result, err := yqlib.NewStringEvaluator().EvaluateAll(query, string(yamlData), _encoder, _decoder)
+
+	if err != nil {
+		return "", err
+	}
+
+	return result, nil
 }
 
 func (h *HelmTester) CheckPermissions(verb, resource, group, version, ns string) bool {
