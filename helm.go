@@ -12,6 +12,7 @@ import (
 
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
 	"github.com/stretchr/testify/assert"
+	"gopkg.in/op/go-logging.v1"
 	"gopkg.in/yaml.v3"
 	authv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -42,7 +43,8 @@ type HelmTester struct {
 
 	_rest_config *rest.Config
 
-	_rendered any
+	_rendered     any
+	_chart_values any
 }
 
 func NewHelmTester(helm_path string) *HelmTester {
@@ -193,6 +195,7 @@ func (c *HelmChart) _DependenciesValues() []any {
 func (h *HelmTester) Render() (any, error) {
 	_e := engine.New(h._rest_config)
 	v, e := chartutil.ToRenderValues(h.Chart.Chart, h.Chart.Values, chartutil.ReleaseOptions{}, nil)
+	h._chart_values = v.AsMap()
 	if e != nil {
 		return nil, e
 	}
@@ -228,6 +231,8 @@ func (h *HelmTester) Query(query string) (string, error) {
 	}
 
 	// data := map[string]any{"name": "ricardo"}
+
+	logging.SetLevel(logging.CRITICAL, "yq-lib")
 
 	yamlData, err := yaml.Marshal(data)
 	if err != nil {
