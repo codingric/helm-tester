@@ -43,8 +43,9 @@ type HelmTester struct {
 
 	_rest_config *rest.Config
 
-	_rendered     any
-	_chart_values chartutil.Values
+	_rendered            any
+	_chart_values        chartutil.Values
+	_dependencies_values DependancyValues
 }
 
 func NewHelmTester(helm_path string) *HelmTester {
@@ -195,6 +196,16 @@ func (h *HelmTester) AssertQueryTrue(t *testing.T, query string, msg string, arg
 	}
 }
 
+type DependancyValues []chartutil.Values
+
+func (vs DependancyValues) AsMaps() []any {
+	v := []any{}
+	for _, vv := range vs {
+		v = append(v, vv.AsMap())
+	}
+	return v
+}
+
 func (h *HelmTester) Query(query string) (string, error) {
 	if h._rendered == nil {
 		_, e := h.Render()
@@ -203,9 +214,16 @@ func (h *HelmTester) Query(query string) (string, error) {
 			return "", e
 		}
 	}
+	if h._dependencies_values == nil {
+		h._dependencies_values = DependancyValues{}
+		for _, hc := range h.Chart.Dependencies {
+			v, _ := chartutil.ToRenderValues(hc.Chart, hc.Chart.Values, chartutil.ReleaseOptions{}, nil)
+			h._dependencies_values = append(h._dependencies_values, v)
+		}
+	}
 	data := map[string]any{
 		"Chart":        h._chart_values.AsMap(),
-		"Dependencies": h.Chart._DependenciesValues(),
+		"Dependencies": h._dependencies_values.AsMaps(),
 		"Manifests":    h._rendered,
 	}
 
