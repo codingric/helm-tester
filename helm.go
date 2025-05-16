@@ -309,7 +309,16 @@ func (h *HelmTester) AssertPodsUsingImage(t *testing.T, ns, labels, image string
 			fmt.Sprintf("%s/image", pod.Name),
 			func(tt *testing.T) {
 				for _, cont := range pod.Spec.Containers {
-					assert.True(tt, strings.Contains(cont.Image, image), "expecting %s got %s", image, cont.Image)
+					if len(containers) > 0 && cont.Name != containers[0] {
+						continue
+					}
+					assert.True(tt, strings.Contains(cont.Image, image), "expecting %s got %s in container %s", image, cont.Image, cont.Name)
+				}
+				for _, cont := range pod.Spec.InitContainers {
+					if len(containers) > 0 && cont.Name != containers[0] {
+						continue
+					}
+					assert.True(tt, strings.Contains(cont.Image, image), "expecting %s got %s in container %s", image, cont.Image, cont.Name)
 				}
 			},
 		)
