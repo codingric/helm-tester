@@ -324,3 +324,23 @@ func (h *HelmTester) AssertPodsUsingImage(t *testing.T, ns, labels, image string
 		)
 	}
 }
+
+func YQ(data any, query string) (string, error) {
+	logging.SetLevel(logging.CRITICAL, "yq-lib")
+
+	yamlData, err := yaml.Marshal(data)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	_decoder := yqlib.NewYamlDecoder(yqlib.ConfiguredYamlPreferences)
+	_encoder := yqlib.NewYamlEncoder(yqlib.ConfiguredYamlPreferences)
+
+	result, err := yqlib.NewStringEvaluator().EvaluateAll(query, string(yamlData), _encoder, _decoder)
+
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimRight(result, "\n"), nil
+}
