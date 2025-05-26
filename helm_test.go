@@ -45,17 +45,81 @@ func TestQuery(t *testing.T) {
 	t.Run("manifests", func(tt *testing.T) {
 		ht.AssertQueryTrue(tt, `.Manifests|keys|contains(["test-chart/charts/echo-server/templates/deployment.yaml"])`, "Missing manifests")
 	})
-
-	t.Run("yq", func(tt *testing.T) {
-		data := ""
-		v, e := ht.YQ(data, `.Dependencies[1].Values.image.tag`)
+	t.Run("yq.blank", func(tt *testing.T) {
+		v, e := ht.YQ(nil, `.Dependencies[1].Values.image.tag`)
 		if assert.NoError(tt, e) {
 			assert.Equal(tt, "0.6.0", v)
 		}
-		data = `name: "Ricardo"`
-		v, e = ht.YQ(data, ".name")
+	})
+
+	t.Run("yq.string", func(tt *testing.T) {
+		data := `
+str: "string value"
+int: 16
+bool: true
+list:
+- one
+- 2`
+		v, e := ht.YQ(data, ".str")
 		if assert.NoError(tt, e) {
-			assert.Equal(tt, "Ricardo", v)
+			assert.IsType(tt, "string value", v)
+			assert.Equal(tt, "string value", v)
+		}
+
+		v, e = ht.YQ(data, ".list")
+		if assert.NoError(tt, e) {
+			x := []any{"one", 2}
+			assert.IsType(tt, x, v)
+			assert.Equal(tt, x, v)
+		}
+		v, e = ht.YQ(data, ".bool")
+		if assert.NoError(tt, e) {
+			x := true
+			assert.IsType(tt, x, v)
+			assert.Equal(tt, x, v)
+		}
+		v, e = ht.YQ(data, ".int")
+		if assert.NoError(tt, e) {
+			x := 16
+			assert.IsType(tt, x, v)
+			assert.Equal(tt, x, v)
+		}
+
+		v, e = ht.YQ(data, ".nonexistant")
+		if assert.NoError(tt, e) {
+			assert.Nil(tt, v)
+		}
+	})
+
+	t.Run("yq.any", func(tt *testing.T) {
+		data := map[string]any{"string": "string_value", "bool": true, "int": 16, "list": []any{"one", 2}}
+		v, e := ht.YQ(data, ".string")
+		if assert.NoError(tt, e) {
+			assert.IsType(tt, "string_value", v)
+			assert.Equal(tt, "string_value", v)
+		}
+
+		v, e = ht.YQ(data, ".list")
+		if assert.NoError(tt, e) {
+			x := []any{"one", 2}
+			assert.IsType(tt, x, v)
+			assert.Equal(tt, x, v)
+		}
+		v, e = ht.YQ(data, ".bool")
+		if assert.NoError(tt, e) {
+			x := true
+			assert.IsType(tt, x, v)
+			assert.Equal(tt, x, v)
+		}
+		v, e = ht.YQ(data, ".int")
+		if assert.NoError(tt, e) {
+			x := 16
+			assert.IsType(tt, x, v)
+			assert.Equal(tt, x, v)
+		}
+		v, e = ht.YQ(data, ".nonexistant")
+		if assert.NoError(tt, e) {
+			assert.Nil(tt, v)
 		}
 	})
 }

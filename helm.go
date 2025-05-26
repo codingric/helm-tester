@@ -325,8 +325,9 @@ func (h *HelmTester) AssertPodsUsingImage(t *testing.T, ns, labels, image string
 	}
 }
 
-func (h *HelmTester) YQ(data string, query string) (string, error) {
-	if data == "" {
+func (h *HelmTester) YQ(data any, query string) (any, error) {
+	data_string, is_string := data.(string)
+	if data == nil {
 		if h._rendered == nil {
 			_, e := h.Render()
 			if e != nil {
@@ -350,7 +351,13 @@ func (h *HelmTester) YQ(data string, query string) (string, error) {
 		if err != nil {
 			log.Fatal(err)
 		}
-		data = string(yamlBytes)
+		data_string = string(yamlBytes)
+	} else if !is_string {
+		yamlBytes, err := yaml.Marshal(data)
+		if err != nil {
+			log.Fatal(err)
+		}
+		data_string = string(yamlBytes)
 	}
 
 	logging.SetLevel(logging.CRITICAL, "yq-lib")
@@ -358,11 +365,17 @@ func (h *HelmTester) YQ(data string, query string) (string, error) {
 	_decoder := yqlib.NewYamlDecoder(yqlib.ConfiguredYamlPreferences)
 	_encoder := yqlib.NewYamlEncoder(yqlib.ConfiguredYamlPreferences)
 
-	result, err := yqlib.NewStringEvaluator().EvaluateAll(query, data, _encoder, _decoder)
+	result, err := yqlib.NewStringEvaluator().EvaluateAll(query, data_string, _encoder, _decoder)
 
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	return strings.TrimRight(result, "\n"), nil
+	var response any
+	err = yaml.Unmarshal([]byte(result), &response)
+	if err != nil {
+		return nil, err
+	}
+
+	return response, nil
 }
