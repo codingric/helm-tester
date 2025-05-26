@@ -325,18 +325,40 @@ func (h *HelmTester) AssertPodsUsingImage(t *testing.T, ns, labels, image string
 	}
 }
 
-func YQ(data any, query string) (string, error) {
-	logging.SetLevel(logging.CRITICAL, "yq-lib")
-
-	yamlData, err := yaml.Marshal(data)
-	if err != nil {
-		log.Fatal(err)
+func (h *HelmTester) YQ(data string, query string) (string, error) {
+	if data == "" {
+		if h._rendered == nil {
+			_, e := h.Render()
+			if e != nil {
+				log.Printf("Query render error: %s", e)
+				return "", e
+			}
+		}
+		if h._dependencies_values == nil {
+			h._dependencies_values = DependancyValues{}
+			for _, hc := range h.Chart.Dependencies {
+				v, _ := chartutil.ToRenderValues(hc.Chart, hc.Chart.Values, chartutil.ReleaseOptions{}, nil)
+				h._dependencies_values = append(h._dependencies_values, v)
+			}
+		}
+		yamlData := map[string]any{
+			"Chart":        h._chart_values.AsMap(),
+			"Dependencies": h._dependencies_values.AsMaps(),
+			"Manifests":    h._rendered,
+		}
+		yamlBytes, err := yaml.Marshal(yamlData)
+		if err != nil {
+			log.Fatal(err)
+		}
+		data = string(yamlBytes)
 	}
+
+	logging.SetLevel(logging.CRITICAL, "yq-lib")
 
 	_decoder := yqlib.NewYamlDecoder(yqlib.ConfiguredYamlPreferences)
 	_encoder := yqlib.NewYamlEncoder(yqlib.ConfiguredYamlPreferences)
 
-	result, err := yqlib.NewStringEvaluator().EvaluateAll(query, string(yamlData), _encoder, _decoder)
+	result, err := yqlib.NewStringEvaluator().EvaluateAll(query, data, _encoder, _decoder)
 
 	if err != nil {
 		return "", err
