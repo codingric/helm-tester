@@ -43,7 +43,7 @@ func TestQuery(t *testing.T) {
 		ht.AssertQueryTrue(tt, `.Dependencies[1].Values.image.tag == "0.6.0"`, "Dependencies values not present")
 	})
 	t.Run("manifests", func(tt *testing.T) {
-		ht.AssertQueryTrue(tt, `.Manifests|keys|contains(["test-chart/charts/echo-server/templates/deployment.yaml"])`, "Missing manifests")
+		ht.AssertQueryTrue(tt, `.Manifests|length == 75`, "Missing manifests")
 	})
 	t.Run("yq.blank", func(tt *testing.T) {
 		v, e := ht.YQ(nil, `.Dependencies[1].Values.image.tag`)

@@ -179,11 +179,21 @@ func (h *HelmTester) Render() (any, error) {
 	if e != nil {
 		return nil, e
 	}
-	m := map[string]any{}
-	for k, v := range r {
-		var d any
-		yaml.Unmarshal([]byte(v), &d)
-		m[k] = d
+	m := []any{}
+	for _, v := range r {
+		reader := strings.NewReader(v)
+		dec := yaml.NewDecoder(reader)
+		var node yaml.Node
+		for {
+			err := dec.Decode(&node)
+			if err != nil {
+				// Typically, you'll hit io.EOF when there are no more documents
+				break
+			}
+			var data any
+			node.Decode(&data)
+			m = append(m, data)
+		}
 	}
 	h._rendered = m
 	return m, nil
