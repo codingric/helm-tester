@@ -335,14 +335,14 @@ func (h *HelmTester) AssertPodsUsingImage(t *testing.T, ns, labels, image string
 	}
 }
 
-func (h *HelmTester) YQ(data any, query string) (any, error) {
+func (h *HelmTester) YQ(data any, query string, target any) error {
 	data_string, is_string := data.(string)
 	if data == nil {
 		if h._rendered == nil {
 			_, e := h.Render()
 			if e != nil {
 				log.Printf("Query render error: %s", e)
-				return "", e
+				return e
 			}
 		}
 		if h._dependencies_values == nil {
@@ -378,14 +378,12 @@ func (h *HelmTester) YQ(data any, query string) (any, error) {
 	result, err := yqlib.NewStringEvaluator().EvaluateAll(query, data_string, _encoder, _decoder)
 
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	var response any
-	err = yaml.Unmarshal([]byte(result), &response)
+	err = yaml.Unmarshal([]byte(result), target)
 	if err != nil {
-		return nil, err
+		return err
 	}
-
-	return response, nil
+	return nil
 }

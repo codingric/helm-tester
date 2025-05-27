@@ -46,7 +46,8 @@ func TestQuery(t *testing.T) {
 		ht.AssertQueryTrue(tt, `.Manifests|length == 75`, "Missing manifests")
 	})
 	t.Run("yq.blank", func(tt *testing.T) {
-		v, e := ht.YQ(nil, `.Dependencies[1].Values.image.tag`)
+		var v string
+		e := ht.YQ(nil, `.Dependencies[1].Values.image.tag`, &v)
 		if assert.NoError(tt, e) {
 			assert.Equal(tt, "0.6.0", v)
 		}
@@ -54,72 +55,87 @@ func TestQuery(t *testing.T) {
 
 	t.Run("yq.string", func(tt *testing.T) {
 		data := `
-str: "string value"
+string: "string_value"
 int: 16
 bool: true
 list:
 - one
 - 2`
-		v, e := ht.YQ(data, ".str")
-		if assert.NoError(tt, e) {
-			assert.IsType(tt, "string value", v)
-			assert.Equal(tt, "string value", v)
-		}
-
-		v, e = ht.YQ(data, ".list")
-		if assert.NoError(tt, e) {
-			x := []any{"one", 2}
-			assert.IsType(tt, x, v)
-			assert.Equal(tt, x, v)
-		}
-		v, e = ht.YQ(data, ".bool")
-		if assert.NoError(tt, e) {
-			x := true
-			assert.IsType(tt, x, v)
-			assert.Equal(tt, x, v)
-		}
-		v, e = ht.YQ(data, ".int")
-		if assert.NoError(tt, e) {
-			x := 16
-			assert.IsType(tt, x, v)
-			assert.Equal(tt, x, v)
-		}
-
-		v, e = ht.YQ(data, ".nonexistant")
-		if assert.NoError(tt, e) {
-			assert.Nil(tt, v)
-		}
-	})
-
-	t.Run("yq.any", func(tt *testing.T) {
-		data := map[string]any{"string": "string_value", "bool": true, "int": 16, "list": []any{"one", 2}}
-		v, e := ht.YQ(data, ".string")
+		var v string
+		e := ht.YQ(data, ".string", &v)
 		if assert.NoError(tt, e) {
 			assert.IsType(tt, "string_value", v)
 			assert.Equal(tt, "string_value", v)
 		}
 
-		v, e = ht.YQ(data, ".list")
+		var l []any
+		e = ht.YQ(data, ".list", &l)
 		if assert.NoError(tt, e) {
 			x := []any{"one", 2}
-			assert.IsType(tt, x, v)
-			assert.Equal(tt, x, v)
+			assert.IsType(tt, x, l)
+			assert.Equal(tt, x, l)
 		}
-		v, e = ht.YQ(data, ".bool")
+
+		var b bool
+		e = ht.YQ(data, ".bool", &b)
 		if assert.NoError(tt, e) {
 			x := true
-			assert.IsType(tt, x, v)
-			assert.Equal(tt, x, v)
+			assert.IsType(tt, x, b)
+			assert.Equal(tt, x, b)
 		}
-		v, e = ht.YQ(data, ".int")
+
+		var i int
+		e = ht.YQ(data, ".int", &i)
 		if assert.NoError(tt, e) {
 			x := 16
-			assert.IsType(tt, x, v)
-			assert.Equal(tt, x, v)
+			assert.IsType(tt, x, i)
+			assert.Equal(tt, x, i)
 		}
-		v, e = ht.YQ(data, ".nonexistant")
+
+		var z any
+		e = ht.YQ(data, ".nonexistant", &z)
 		if assert.NoError(tt, e) {
-			assert.Nil(tt, v)
+			assert.Nil(tt, z)
+		}
+	})
+
+	t.Run("yq.any", func(tt *testing.T) {
+		data := map[string]any{"string": "string_value", "bool": true, "int": 16, "list": []any{"one", 2}}
+		var v string
+		e := ht.YQ(data, ".string", &v)
+		if assert.NoError(tt, e) {
+			assert.IsType(tt, "string_value", v)
+			assert.Equal(tt, "string_value", v)
+		}
+
+		var l []any
+		e = ht.YQ(data, ".list", &l)
+		if assert.NoError(tt, e) {
+			x := []any{"one", 2}
+			assert.IsType(tt, x, l)
+			assert.Equal(tt, x, l)
+		}
+
+		var b bool
+		e = ht.YQ(data, ".bool", &b)
+		if assert.NoError(tt, e) {
+			x := true
+			assert.IsType(tt, x, b)
+			assert.Equal(tt, x, b)
+		}
+
+		var i int
+		e = ht.YQ(data, ".int", &i)
+		if assert.NoError(tt, e) {
+			x := 16
+			assert.IsType(tt, x, i)
+			assert.Equal(tt, x, i)
+		}
+
+		var z any
+		e = ht.YQ(data, ".nonexistant", &z)
+		if assert.NoError(tt, e) {
+			assert.Nil(tt, z)
 		}
 	})
 }
