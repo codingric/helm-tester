@@ -73,7 +73,6 @@ func NewHelmTester(helm_path string) *HelmTester {
 	}
 
 	_rest_config, _ := clientcmd.BuildConfigFromFlags("", kubeconfigpath)
-	tester.ClusterName = strings.Split(kubeconfig.CurrentContext, "/")[1]
 	tester.Client, err = kubernetes.NewForConfig(_rest_config)
 	tester.DynamicClient, _ = dynamic.NewForConfig(_rest_config)
 
