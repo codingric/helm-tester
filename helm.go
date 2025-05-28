@@ -65,6 +65,13 @@ func NewHelmTester(helm_path string) *HelmTester {
 	// Configure Kubes
 	kubeconfigpath := filepath.Join(os.Getenv("HOME"), ".kube", "config")
 	kubeconfig := clientcmd.GetConfigFromFileOrDie(kubeconfigpath)
+
+	if strings.Contains(kubeconfig.CurrentContext, "aws") {
+		tester.ClusterName = strings.Split(kubeconfig.CurrentContext, "/")[1]
+	} else if strings.Contains(kubeconfig.CurrentContext, "gke") {
+		tester.ClusterName = strings.Split(kubeconfig.CurrentContext, "_")[3]
+	}
+
 	_rest_config, _ := clientcmd.BuildConfigFromFlags("", kubeconfigpath)
 	tester.ClusterName = strings.Split(kubeconfig.CurrentContext, "/")[1]
 	tester.Client, err = kubernetes.NewForConfig(_rest_config)
