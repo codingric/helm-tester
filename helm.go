@@ -110,7 +110,7 @@ func UpdateDependencies(chartPath string) error {
 	// Check if dependencies are already downloaded
 	allDepsPresent := true
 	for _, dep := range c.Metadata.Dependencies {
-		depPath := filepath.Join(chartsDir, fmt.Sprintf("%s-%s.tgz", dep.Name, dep.Version))
+		depPath := filepath.Join(chartsDir, fmt.Sprintf("%s-%s.tgz", dep.Name, strings.TrimLeft(dep.Version, "v")))
 		if _, err := os.Stat(depPath); os.IsNotExist(err) {
 			allDepsPresent = false
 			fmt.Printf("Missing dependency: %s %s\n", dep.Name, dep.Version)
