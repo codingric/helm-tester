@@ -113,6 +113,7 @@ func UpdateDependencies(chartPath string) error {
 		depPath := filepath.Join(chartsDir, fmt.Sprintf("%s-%s.tgz", dep.Name, dep.Version))
 		if _, err := os.Stat(depPath); os.IsNotExist(err) {
 			allDepsPresent = false
+			fmt.Printf("Missing dependency: %s %s\n", dep.Name, dep.Version)
 			break
 		}
 	}
@@ -163,14 +164,6 @@ func (c *HelmChart) _Dependencies() []*HelmChart {
 		h = append(h, &HelmChart{d, nil})
 	}
 	return h
-}
-
-func (c *HelmChart) _DependenciesValues() []any {
-	v := []any{}
-	for _, d := range c.Chart.Dependencies() {
-		v = append(v, d.Values)
-	}
-	return v
 }
 
 func (h *HelmTester) Render() (any, error) {

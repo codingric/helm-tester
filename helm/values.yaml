@@ -1,0 +1,18 @@
+echo-server:
+  image:
+    tag: updated
+kyverno:
+  upgrade:
+    fromV2: true
+  backgroundController:
+    rbac:
+      clusterRole:
+        extraResources:
+          - apiGroups:
+              - apps
+            resources:
+              - deployments
+              - daemonsets
+              - statefulsets
+            verbs:
+              - update

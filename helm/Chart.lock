@@ -1,0 +1,9 @@
+dependencies:
+- name: kyverno
+  repository: https://repo.bab.net.au/artifactory/helm
+  version: 3.0.9
+- name: echo-server
+  repository: https://ealenn.github.io/charts
+  version: 0.5.0
+digest: sha256:a2d84c28ea0294a6ee16c6235ad87df4899ce9c1e6018ac8a49c51633bcfc451
+generated: "2025-05-14T12:16:15.41847+10:00"
