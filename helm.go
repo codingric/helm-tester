@@ -35,6 +35,7 @@ type HelmTester struct {
 	Client        *kubernetes.Clientset
 	DynamicClient *dynamic.DynamicClient
 	ClusterName   string
+	ContextName   string
 	Chart         *HelmChart
 
 	_pods_allowed       bool
@@ -65,6 +66,7 @@ func NewHelmTester(helm_path string) *HelmTester {
 	// Configure Kubes
 	kubeconfigpath := filepath.Join(os.Getenv("HOME"), ".kube", "config")
 	kubeconfig := clientcmd.GetConfigFromFileOrDie(kubeconfigpath)
+	tester.ContextName = kubeconfig.CurrentContext
 
 	if strings.Contains(kubeconfig.CurrentContext, "aws") {
 		tester.ClusterName = strings.Split(kubeconfig.CurrentContext, "/")[1]
