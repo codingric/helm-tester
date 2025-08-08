@@ -15,7 +15,6 @@ import (
 	"gopkg.in/op/go-logging.v1"
 	"gopkg.in/yaml.v3"
 	authv1 "k8s.io/api/authorization/v1"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -310,26 +309,20 @@ func (h *HelmTester) AssertPodsUsingImage(t *testing.T, ns, labels, image string
 
 	for _, pod := range pods.Items {
 		t.Run(
-			fmt.Sprintf("%s/state", pod.Name),
+			pod.Name,
 			func(tt *testing.T) {
-				assert.Equal(tt, corev1.PodPhase("Running"), pod.Status.Phase, "%v not running", pod.Name)
-			},
-		)
-
-		t.Run(
-			fmt.Sprintf("%s/image", pod.Name),
-			func(tt *testing.T) {
-				for _, cont := range pod.Spec.Containers {
-					if len(containers) > 0 && cont.Name != containers[0] {
-						continue
+				for _, status := range pod.Status.ContainerStatuses {
+					assert.True(tt, status.Ready, "%s is not ready", status.Name)
+					if len(containers) > 0 {
+						for _, c := range containers {
+							if status.Name == c {
+								assert.Equal(tt, image, status.Image)
+								break
+							}
+						}
+					} else {
+						assert.Equal(tt, image, status.Image)
 					}
-					assert.Contains(tt, cont.Image, image, "expecting %s got %s in container %s", image, cont.Image, cont.Name)
-				}
-				for _, cont := range pod.Spec.InitContainers {
-					if len(containers) > 0 && cont.Name != containers[0] {
-						continue
-					}
-					assert.Contains(tt, cont.Image, image, "expecting %s got %s in container %s", image, cont.Image, cont.Name)
 				}
 			},
 		)
