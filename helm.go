@@ -316,12 +316,12 @@ func (h *HelmTester) AssertPodsUsingImage(t *testing.T, ns, labels, image string
 					if len(containers) > 0 {
 						for _, c := range containers {
 							if status.Name == c {
-								assert.Equal(tt, image, status.Image)
+								assert.Equal(tt, image, status.Image, "Image not expected")
 								break
 							}
 						}
 					} else {
-						assert.Equal(tt, image, status.Image)
+						assert.Equal(tt, image, status.Image, "Image not expected")
 					}
 				}
 			},
