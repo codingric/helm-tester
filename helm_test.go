@@ -6,32 +6,50 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// func TestHelm(t *testing.T) {
-// 	ht := NewHelmTester("./helm")
+type H map[string]any
 
-// 	m, err := ht.Render()
-// 	t.Run("render", func(tt *testing.T) {
-// 		tt.Run("no-errors", func(ttt *testing.T) {
-// 			assert.NoError(ttt, err)
-// 			assert.NotEmpty(ttt, m)
-// 		})
-// 		tt.Run("files", func(ttt *testing.T) {
-// 			assert.Contains(ttt, m, "test-chart/charts/echo-server/templates/deployment.yaml")
-// 		})
+func TestRender(t *testing.T) {
+	ht := NewHelmTester("./helm")
 
-// 		tt.Run("value-updates", func(ttt *testing.T) {
-// 			var deploy any
+	var output any
+	var err error
 
-// 			err := yaml.Unmarshal([]byte(m["test-chart/charts/echo-server/templates/deployment.yaml"]), &deploy)
-// 			if err != nil {
-// 				log.Fatalf("Error unmarshaling YAML: %v", err)
-// 			}
-// 			image := ht.JQValues(`.Dependencies[0].image.repository`)
-// 			rendered, _ := _query(".spec.template.spec.containers[0].image", deploy)
-// 			assert.Equal(ttt, rendered.(string), image, "image not updated")
-// 		})
-// 	})
-// }
+	t.Run("render", func(tt *testing.T) {
+		output, err = ht.Render(nil)
+		assert.NoError(tt, err)
+		if !assert.NoError(tt, err) {
+			return
+		}
+		var result string
+		err = ht.YQ(output, `.[]|select(.kind == "Deployment" and .metadata.name =="-echo-server")|.spec.template.spec.containers[0].image`, &result)
+		assert.NoError(tt, err)
+		if !assert.NoError(tt, err) {
+			return
+		}
+		assert.Equal(tt, "ealen/echo-server:updated", result)
+	})
+	t.Run("render with values", func(tt *testing.T) {
+		tag := "overriden"
+		vals := map[string]interface{}{
+			"echo-server": map[string]interface{}{
+				"image": map[string]interface{}{
+					"tag": tag,
+				},
+			},
+		}
+		output, err = ht.Render(vals)
+		if !assert.NoError(tt, err) {
+			return
+		}
+		var result string
+		err = ht.YQ(output, `.[]|select(.kind == "Deployment" and .metadata.name =="-echo-server")|.spec.template.spec.containers[0].image`, &result)
+		assert.NoError(tt, err)
+		if !assert.NoError(tt, err) {
+			return
+		}
+		assert.Equal(tt, "ealen/echo-server:"+tag, result)
+	})
+}
 
 func TestQuery(t *testing.T) {
 	ht := NewHelmTester("./helm")

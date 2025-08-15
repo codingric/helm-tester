@@ -53,8 +53,8 @@ func NewHelmTester(helm_path string) *HelmTester {
 	var err error
 
 	// Load helm values
-	UpdateDependencies(helm_path)
-	c, err := loader.Load(helm_path)
+
+	c, err := UpdateDependencies(helm_path)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -96,16 +96,16 @@ func NewHelmTester(helm_path string) *HelmTester {
 	return tester
 }
 
-func UpdateDependencies(chartPath string) error {
+func UpdateDependencies(chartPath string) (c *chart.Chart, err error) {
 	settings := cli.New()
 	providers := getter.All(settings)
 	chartYamlPath := filepath.Join(chartPath, "Chart.yaml")
 	chartsDir := filepath.Join(chartPath, "charts")
 
 	// Load the chart to inspect dependencies
-	c, err := loader.Load(chartPath)
+	c, err = loader.Load(chartPath)
 	if err != nil {
-		return fmt.Errorf("failed to load chart from %s: %w", chartPath, err)
+		return
 	}
 
 	// Check if dependencies are already downloaded
@@ -121,7 +121,7 @@ func UpdateDependencies(chartPath string) error {
 
 	if allDepsPresent {
 		fmt.Println("All dependencies are already downloaded.")
-		return nil
+		return
 	}
 	fmt.Println("Updating dependencies.")
 
@@ -136,11 +136,12 @@ func UpdateDependencies(chartPath string) error {
 		Debug:            false,
 	}
 
-	if err := manager.Update(); err != nil {
-		return fmt.Errorf("failed to update dependencies for chart %s: %w", chartYamlPath, err)
+	if err = manager.Update(); err != nil {
+		err = fmt.Errorf("failed to update dependencies for chart %s: %w", chartYamlPath, err)
+		return
 	}
 
-	return nil
+	return
 }
 
 func GetDefaultValues(chartPath string) (map[string]interface{}, error) {
@@ -167,9 +168,9 @@ func (c *HelmChart) _Dependencies() []*HelmChart {
 	return h
 }
 
-func (h *HelmTester) Render() (any, error) {
+func (h *HelmTester) Render(values map[string]interface{}) (any, error) {
 	_e := engine.New(h._rest_config)
-	v, e := chartutil.ToRenderValues(h.Chart.Chart, h.Chart.Values, chartutil.ReleaseOptions{}, nil)
+	v, e := chartutil.ToRenderValues(h.Chart.Chart, values, chartutil.ReleaseOptions{}, nil)
 	h._chart_values = v
 	if e != nil {
 		return nil, e
@@ -218,7 +219,7 @@ func (vs DependancyValues) AsMaps() []any {
 
 func (h *HelmTester) Query(query string) (string, error) {
 	if h._rendered == nil {
-		_, e := h.Render()
+		_, e := h.Render(nil)
 		if e != nil {
 			log.Printf("Query render error: %s", e)
 			return "", e
@@ -337,7 +338,7 @@ func (h *HelmTester) YQ(data any, query string, target any) error {
 	data_string, is_string := data.(string)
 	if data == nil {
 		if h._rendered == nil {
-			_, e := h.Render()
+			_, e := h.Render(nil)
 			if e != nil {
 				log.Printf("Query render error: %s", e)
 				return e
