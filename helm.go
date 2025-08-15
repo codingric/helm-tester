@@ -386,3 +386,11 @@ func (h *HelmTester) YQ(data any, query string, target any) error {
 	}
 	return nil
 }
+
+func (h *HelmTester) YQString(data any, query string) string {
+	var v string
+	if err := h.YQ(data, query, &v); err != nil {
+		panic(err)
+	}
+	return v
+}
