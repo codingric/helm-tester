@@ -1,6 +1,7 @@
 package helm_tester
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -8,8 +9,33 @@ import (
 
 type H map[string]any
 
+func assertNoPanic(t *testing.T, f func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Test failed with panic: %v", r)
+			t.FailNow()
+		}
+	}()
+	f()
+}
+
+func TestNewHelmTester(t *testing.T) {
+	assertNoPanic(t, func() {
+		os.Remove("./helm/charts/echo-server-0.5.0.tgz")
+		NewHelmTester("./helm", WithSkipDependencyUpdate())
+		_, err := os.Stat("./helm/charts/echo-server-0.5.0.tgz")
+		assert.Error(t, err, "Expected no charts to be downloaded")
+	})
+	assertNoPanic(t, func() {
+		os.Remove("./helm/charts/echo-server-0.5.0.tgz")
+		NewHelmTester("./helm")
+		_, err := os.Stat("./helm/charts/echo-server-0.5.0.tgz")
+		assert.NoError(t, err, "Expected charts to be downloaded")
+	})
+}
+
 func TestRender(t *testing.T) {
-	ht := NewHelmTester("./helm")
+	ht, _ := NewHelmTester("./helm", WithSkipDependencyUpdate())
 
 	var output any
 	var err error
@@ -21,7 +47,7 @@ func TestRender(t *testing.T) {
 			return
 		}
 		var result string
-		err = ht.YQ(output, `.[]|select(.kind == "Deployment" and .metadata.name =="-echo-server")|.spec.template.spec.containers[0].image`, &result)
+		err = ht.YQ(`.[]|select(.kind == "Deployment" and .metadata.name =="-echo-server")|.spec.template.spec.containers[0].image`, &result, output)
 		assert.NoError(tt, err)
 		if !assert.NoError(tt, err) {
 			return
@@ -42,7 +68,7 @@ func TestRender(t *testing.T) {
 			return
 		}
 		var result string
-		err = ht.YQ(output, `.[]|select(.kind == "Deployment" and .metadata.name =="-echo-server")|.spec.template.spec.containers[0].image`, &result)
+		err = ht.YQ(`.[]|select(.kind == "Deployment" and .metadata.name =="-echo-server")|.spec.template.spec.containers[0].image`, &result, output)
 		assert.NoError(tt, err)
 		if !assert.NoError(tt, err) {
 			return
@@ -52,22 +78,36 @@ func TestRender(t *testing.T) {
 }
 
 func TestQuery(t *testing.T) {
-	ht := NewHelmTester("./helm")
+	ht, _ := NewHelmTester("./helm")
 
 	t.Run("values", func(tt *testing.T) {
-		ht.AssertQueryTrue(tt, `.Chart.Values|keys|contains(["echo-server"])`, "Chart values not present")
+		var keys []string
+		err := ht.YQ(`.Chart.Values|keys`, &keys)
+		if !assert.NoError(tt, err) {
+			return
+		}
+		assert.Contains(tt, keys, "echo-server")
 	})
 	t.Run("dependency-values", func(tt *testing.T) {
-		ht.AssertQueryTrue(tt, `.Dependencies[1].Values.image.tag == "0.6.0"`, "Dependencies values not present")
+		var v string
+		e := ht.YQ(`.Dependencies[1].Values.image.tag`, &v)
+		if assert.NoError(tt, e) {
+			assert.Equal(tt, "0.6.0", v)
+		}
 	})
 	t.Run("manifests", func(tt *testing.T) {
-		ht.AssertQueryTrue(tt, `.Manifests|length == 75`, "Missing manifests")
+		var m []any
+		e := ht.YQ(`[.Manifests[].kind]`, &m)
+		if assert.NoError(tt, e) {
+			assert.Len(tt, m, 5)
+		}
+
 	})
 	t.Run("yq.blank", func(tt *testing.T) {
 		var v string
-		e := ht.YQ(nil, `.Dependencies[1].Values.image.tag`, &v)
+		e := ht.YQ(`.Dependencies[1].Values.image.tagxx`, &v)
 		if assert.NoError(tt, e) {
-			assert.Equal(tt, "0.6.0", v)
+			assert.Equal(tt, "", v)
 		}
 	})
 
@@ -80,14 +120,14 @@ list:
 - one
 - 2`
 		var v string
-		e := ht.YQ(data, ".string", &v)
+		e := ht.YQ(".string", &v, data)
 		if assert.NoError(tt, e) {
 			assert.IsType(tt, "string_value", v)
 			assert.Equal(tt, "string_value", v)
 		}
 
 		var l []any
-		e = ht.YQ(data, ".list", &l)
+		e = ht.YQ(".list", &l, data)
 		if assert.NoError(tt, e) {
 			x := []any{"one", 2}
 			assert.IsType(tt, x, l)
@@ -95,7 +135,7 @@ list:
 		}
 
 		var b bool
-		e = ht.YQ(data, ".bool", &b)
+		e = ht.YQ(".bool", &b, data)
 		if assert.NoError(tt, e) {
 			x := true
 			assert.IsType(tt, x, b)
@@ -103,7 +143,7 @@ list:
 		}
 
 		var i int
-		e = ht.YQ(data, ".int", &i)
+		e = ht.YQ(".int", &i, data)
 		if assert.NoError(tt, e) {
 			x := 16
 			assert.IsType(tt, x, i)
@@ -111,7 +151,7 @@ list:
 		}
 
 		var z any
-		e = ht.YQ(data, ".nonexistant", &z)
+		e = ht.YQ(".nonexistant", &z, data)
 		if assert.NoError(tt, e) {
 			assert.Nil(tt, z)
 		}
@@ -120,14 +160,14 @@ list:
 	t.Run("yq.any", func(tt *testing.T) {
 		data := map[string]any{"string": "string_value", "bool": true, "int": 16, "list": []any{"one", 2}}
 		var v string
-		e := ht.YQ(data, ".string", &v)
+		e := ht.YQ(".string", &v, data)
 		if assert.NoError(tt, e) {
 			assert.IsType(tt, "string_value", v)
 			assert.Equal(tt, "string_value", v)
 		}
 
 		var l []any
-		e = ht.YQ(data, ".list", &l)
+		e = ht.YQ(".list", &l, data)
 		if assert.NoError(tt, e) {
 			x := []any{"one", 2}
 			assert.IsType(tt, x, l)
@@ -135,7 +175,7 @@ list:
 		}
 
 		var b bool
-		e = ht.YQ(data, ".bool", &b)
+		e = ht.YQ(".bool", &b, data)
 		if assert.NoError(tt, e) {
 			x := true
 			assert.IsType(tt, x, b)
@@ -143,7 +183,7 @@ list:
 		}
 
 		var i int
-		e = ht.YQ(data, ".int", &i)
+		e = ht.YQ(".int", &i, data)
 		if assert.NoError(tt, e) {
 			x := 16
 			assert.IsType(tt, x, i)
@@ -151,7 +191,7 @@ list:
 		}
 
 		var z any
-		e = ht.YQ(data, ".nonexistant", &z)
+		e = ht.YQ(".nonexistant", &z, data)
 		if assert.NoError(tt, e) {
 			assert.Nil(tt, z)
 		}

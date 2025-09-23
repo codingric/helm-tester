@@ -37,34 +37,47 @@ type HelmTester struct {
 	ContextName   string
 	Chart         *HelmChart
 
-	_pods_allowed       bool
-	_secrets_allowed    bool
-	_daemonsets_allowed bool
-
-	_rest_config *rest.Config
-
 	_rendered            any
 	_chart_values        chartutil.Values
 	_dependencies_values DependancyValues
+
+	restConfig *rest.Config
 }
 
-func NewHelmTester(helm_path string) *HelmTester {
-	tester := &HelmTester{}
-	var err error
+type Option func(opt *options)
 
-	// Load helm values
+type options struct {
+	SkipDependencyUpdate bool
+	SkipRepoUpdate       bool
+}
 
-	c, err := UpdateDependencies(helm_path)
-	if err != nil {
-		log.Fatal(err)
+func WithSkipDependencyUpdate() Option {
+	return func(opt *options) {
+		opt.SkipDependencyUpdate = true
 	}
+}
 
-	tester.Chart = &HelmChart{c, nil}
-	tester.Chart.Dependencies = tester.Chart._Dependencies()
+func WithSkipRepoUpdate() Option {
+	return func(opt *options) {
+		opt.SkipRepoUpdate = true
+	}
+}
+
+func NewHelmTester(helm_path string, opts ...Option) (tester *HelmTester, err error) {
+	tester = &HelmTester{}
+	o := options{}
+	for _, opt := range opts {
+		opt(&o)
+	}
 
 	// Configure Kubes
 	kubeconfigpath := filepath.Join(os.Getenv("HOME"), ".kube", "config")
 	kubeconfig := clientcmd.GetConfigFromFileOrDie(kubeconfigpath)
+	if kubeconfig == nil {
+		err = fmt.Errorf("filed to get kubeconfig")
+		return
+	}
+
 	tester.ContextName = kubeconfig.CurrentContext
 
 	if strings.Contains(kubeconfig.CurrentContext, "aws") {
@@ -74,6 +87,7 @@ func NewHelmTester(helm_path string) *HelmTester {
 	}
 
 	_rest_config, _ := clientcmd.BuildConfigFromFlags("", kubeconfigpath)
+	tester.restConfig = _rest_config
 	tester.Client, err = kubernetes.NewForConfig(_rest_config)
 	tester.DynamicClient, _ = dynamic.NewForConfig(_rest_config)
 
@@ -83,30 +97,34 @@ func NewHelmTester(helm_path string) *HelmTester {
 		os.Exit(1)
 	}
 
-	_, err = tester.Client.CoreV1().Pods("default").List(context.TODO(), metav1.ListOptions{})
-	tester._pods_allowed = err == nil
-
-	_, err = tester.Client.CoreV1().Secrets("default").List(context.TODO(), metav1.ListOptions{})
-	tester._secrets_allowed = err == nil
-
-	_, err = tester.Client.AppsV1().DaemonSets("default").List(context.TODO(), metav1.ListOptions{})
-	tester._daemonsets_allowed = err == nil
-
 	fmt.Println("Current context: ", kubeconfig.CurrentContext)
-	return tester
+
+	// Load Chart
+	c, err := loader.Load(helm_path)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if !o.SkipDependencyUpdate {
+		err := UpdateDependencies(c, helm_path, o.SkipRepoUpdate)
+		if err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		fmt.Println("Skipping dependencies update.")
+	}
+	tester.Chart = &HelmChart{c, nil}
+	tester.Chart.Dependencies = tester.Chart._Dependencies()
+	return
 }
 
-func UpdateDependencies(chartPath string) (c *chart.Chart, err error) {
+func UpdateDependencies(c *chart.Chart, path string, skipRepoUpdate bool) (err error) {
 	settings := cli.New()
 	providers := getter.All(settings)
-	chartYamlPath := filepath.Join(chartPath, "Chart.yaml")
-	chartsDir := filepath.Join(chartPath, "charts")
-
-	// Load the chart to inspect dependencies
-	c, err = loader.Load(chartPath)
-	if err != nil {
-		return
-	}
+	chartYamlPath := filepath.Join(path, "Chart.yaml")
+	//_ := filepath.Join(c.ChartPath(), "Chart.lock")
+	chartsDir := filepath.Join(path, "charts")
 
 	// Check if dependencies are already downloaded
 	allDepsPresent := true
@@ -128,12 +146,13 @@ func UpdateDependencies(chartPath string) (c *chart.Chart, err error) {
 	out := io.Discard // Change to &buf if you want to capture the output
 
 	manager := downloader.Manager{
-		ChartPath:        chartPath,
+		ChartPath:        path,
 		Out:              out,
 		Getters:          providers,
-		RepositoryConfig: settings.RepositoryConfig,
-		RepositoryCache:  settings.RepositoryCache,
+		RepositoryConfig: "",
+		RepositoryCache:  "/tmp",
 		Debug:            false,
+		SkipUpdate:       skipRepoUpdate,
 	}
 
 	if err = manager.Update(); err != nil {
@@ -169,7 +188,7 @@ func (c *HelmChart) _Dependencies() []*HelmChart {
 }
 
 func (h *HelmTester) Render(values map[string]interface{}) (any, error) {
-	_e := engine.New(h._rest_config)
+	_e := engine.New(h.restConfig)
 	v, e := chartutil.ToRenderValues(h.Chart.Chart, values, chartutil.ReleaseOptions{}, nil)
 	h._chart_values = v
 	if e != nil {
@@ -334,9 +353,9 @@ func (h *HelmTester) AssertPodsUsingImage(t *testing.T, ns, labels, image string
 	}
 }
 
-func (h *HelmTester) YQ(data any, query string, target any) error {
-	data_string, is_string := data.(string)
-	if data == nil {
+func (h *HelmTester) YQ(query string, target any, data ...any) error {
+	var data_string string
+	if len(data) == 0 {
 		if h._rendered == nil {
 			_, e := h.Render(nil)
 			if e != nil {
@@ -361,12 +380,15 @@ func (h *HelmTester) YQ(data any, query string, target any) error {
 			log.Fatal(err)
 		}
 		data_string = string(yamlBytes)
-	} else if !is_string {
-		yamlBytes, err := yaml.Marshal(data)
+	} else if s, ok := data[0].(string); ok {
+		data_string = s
+	} else {
+		yamlBytes, err := yaml.Marshal(data[0])
 		if err != nil {
 			log.Fatal(err)
 		}
 		data_string = string(yamlBytes)
+
 	}
 
 	logging.SetLevel(logging.CRITICAL, "yq-lib")
@@ -387,9 +409,9 @@ func (h *HelmTester) YQ(data any, query string, target any) error {
 	return nil
 }
 
-func (h *HelmTester) YQString(data any, query string) string {
+func (h *HelmTester) YQString(query string, data ...any) string {
 	var v string
-	if err := h.YQ(data, query, &v); err != nil {
+	if err := h.YQ(query, &v, data); err != nil {
 		panic(err)
 	}
 	return v
