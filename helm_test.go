@@ -19,13 +19,16 @@ func assertNoPanic(t *testing.T, f func()) {
 	f()
 }
 
-func TestNewHelmTester(t *testing.T) {
+func TestNewHelmTesterSkipUpdate(t *testing.T) {
 	assertNoPanic(t, func() {
 		os.Remove("./helm/charts/echo-server-0.5.0.tgz")
 		NewHelmTester("./helm", WithSkipDependencyUpdate())
 		_, err := os.Stat("./helm/charts/echo-server-0.5.0.tgz")
 		assert.Error(t, err, "Expected no charts to be downloaded")
 	})
+}
+
+func TestNewHelmTesterUpdate(t *testing.T) {
 	assertNoPanic(t, func() {
 		os.Remove("./helm/charts/echo-server-0.5.0.tgz")
 		NewHelmTester("./helm")
@@ -33,6 +36,11 @@ func TestNewHelmTester(t *testing.T) {
 		assert.NoError(t, err, "Expected charts to be downloaded")
 	})
 }
+
+// func TestNewHelmTesterReal(t *testing.T) {
+// 	h, _ := NewHelmTester("/Users/admzwh5/src/kyverno-controller/helm")
+// 	h.Query(".Manifests")
+// }
 
 func TestRender(t *testing.T) {
 	ht, _ := NewHelmTester("./helm", WithSkipDependencyUpdate())

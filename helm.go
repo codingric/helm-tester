@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,6 +27,9 @@ import (
 	"helm.sh/helm/v3/pkg/downloader"
 	"helm.sh/helm/v3/pkg/engine"
 	"helm.sh/helm/v3/pkg/getter"
+
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 type HelmTester struct {
@@ -49,6 +51,7 @@ type Option func(opt *options)
 type options struct {
 	SkipDependencyUpdate bool
 	SkipRepoUpdate       bool
+	LogLevel             zerolog.Level
 }
 
 func WithSkipDependencyUpdate() Option {
@@ -63,20 +66,35 @@ func WithSkipRepoUpdate() Option {
 	}
 }
 
+func WithLogLevel(level string) Option {
+	return func(opt *options) {
+		opt.LogLevel, _ = zerolog.ParseLevel(level)
+	}
+}
+
 func NewHelmTester(helm_path string, opts ...Option) (tester *HelmTester, err error) {
 	tester = &HelmTester{}
-	o := options{}
+	log.Trace().Msg("NewHelmTester")
+	o := options{LogLevel: zerolog.InfoLevel}
 	for _, opt := range opts {
 		opt(&o)
 	}
+
+	if os.Getenv("HELMHELPER_LOGLEVEL") != "" {
+		o.LogLevel, _ = zerolog.ParseLevel(os.Getenv("HELMHELPER_LOGLEVEL"))
+	}
+
+	zerolog.SetGlobalLevel(o.LogLevel)
 
 	// Configure Kubes
 	kubeconfigpath := filepath.Join(os.Getenv("HOME"), ".kube", "config")
 	kubeconfig := clientcmd.GetConfigFromFileOrDie(kubeconfigpath)
 	if kubeconfig == nil {
 		err = fmt.Errorf("filed to get kubeconfig")
+		log.Error().Err(err).Msg("Failed to get kubeconfig")
 		return
 	}
+	log.Trace().Msg("Got kubeconfig")
 
 	tester.ContextName = kubeconfig.CurrentContext
 
@@ -84,35 +102,38 @@ func NewHelmTester(helm_path string, opts ...Option) (tester *HelmTester, err er
 		tester.ClusterName = strings.Split(kubeconfig.CurrentContext, "/")[1]
 	} else if strings.Contains(kubeconfig.CurrentContext, "gke") {
 		tester.ClusterName = strings.Split(kubeconfig.CurrentContext, "_")[3]
+	} else {
+		tester.ClusterName = kubeconfig.CurrentContext
 	}
 
 	_rest_config, _ := clientcmd.BuildConfigFromFlags("", kubeconfigpath)
 	tester.restConfig = _rest_config
 	tester.Client, err = kubernetes.NewForConfig(_rest_config)
 	tester.DynamicClient, _ = dynamic.NewForConfig(_rest_config)
+	log.Trace().Msg("Kube clients")
 
 	// Checking connectivity and correct permissions
 	if err != nil {
-		fmt.Printf("error getting Kubernetes clientset: %v\n", err)
+		log.Error().Err(err).Msg("Failed to create client")
 		os.Exit(1)
 	}
 
-	fmt.Println("Current context: ", kubeconfig.CurrentContext)
+	log.Info().Msg("Current context: " + kubeconfig.CurrentContext)
 
 	// Load Chart
+	log.Trace().Msg("Loading chart")
 	c, err := loader.Load(helm_path)
-
 	if err != nil {
-		log.Fatal(err)
+		log.Error().Err(err).Str("path", helm_path).Msg("Failed to load Chart")
 	}
 
 	if !o.SkipDependencyUpdate {
 		err := UpdateDependencies(c, helm_path, o.SkipRepoUpdate)
 		if err != nil {
-			log.Fatal(err)
+			log.Error().Err(err).Msg("Failed to update dependencies")
 		}
 	} else {
-		fmt.Println("Skipping dependencies update.")
+		log.Info().Msg("Skipping dependencies update.")
 	}
 	tester.Chart = &HelmChart{c, nil}
 	tester.Chart.Dependencies = tester.Chart._Dependencies()
@@ -121,43 +142,53 @@ func NewHelmTester(helm_path string, opts ...Option) (tester *HelmTester, err er
 
 func UpdateDependencies(c *chart.Chart, path string, skipRepoUpdate bool) (err error) {
 	settings := cli.New()
+	settings.RepositoryCache = filepath.Join(os.TempDir(), "helm-cache")
+	settings.RepositoryConfig = filepath.Join(os.TempDir(), "helm-repo")
+	settings.Debug = true
 	providers := getter.All(settings)
 	chartYamlPath := filepath.Join(path, "Chart.yaml")
 	//_ := filepath.Join(c.ChartPath(), "Chart.lock")
 	chartsDir := filepath.Join(path, "charts")
 
+	log.Trace().Msg("Checking dependancies")
 	// Check if dependencies are already downloaded
 	allDepsPresent := true
 	for _, dep := range c.Metadata.Dependencies {
+		log.Trace().Msg("Checking " + dep.Name)
 		depPath := filepath.Join(chartsDir, fmt.Sprintf("%s-%s.tgz", dep.Name, strings.TrimLeft(dep.Version, "v")))
 		if _, err := os.Stat(depPath); os.IsNotExist(err) {
 			allDepsPresent = false
-			fmt.Printf("Missing dependency: %s %s\n", dep.Name, dep.Version)
+			log.Info().Msg("Missing dependency: " + dep.Name + " " + dep.Version)
 			break
 		}
 	}
 
 	if allDepsPresent {
-		fmt.Println("All dependencies are already downloaded.")
+		log.Info().Msg("All dependencies are already downloaded.")
 		return
 	}
-	fmt.Println("Updating dependencies.")
+	log.Info().Msg("Updating dependencies.")
 
 	out := io.Discard // Change to &buf if you want to capture the output
+
+	repoFile := filepath.Join(settings.RepositoryConfig)
+	repoCache := filepath.Join(settings.RepositoryCache)
 
 	manager := downloader.Manager{
 		ChartPath:        path,
 		Out:              out,
 		Getters:          providers,
-		RepositoryConfig: "",
-		RepositoryCache:  "/tmp",
-		Debug:            false,
+		RepositoryConfig: repoFile,
+		RepositoryCache:  repoCache,
 		SkipUpdate:       skipRepoUpdate,
 	}
 
-	if err = manager.Update(); err != nil {
+	log.Trace().Msg("Updating...")
+
+	// manager.Update() will update all repos. We use Build() instead to only download missing dependencies.
+	if err = manager.Build(); err != nil {
 		err = fmt.Errorf("failed to update dependencies for chart %s: %w", chartYamlPath, err)
-		return
+		log.Error().Err(err).Msg("Failed to update dependencies")
 	}
 
 	return
@@ -192,13 +223,18 @@ func (h *HelmTester) Render(values map[string]interface{}) (any, error) {
 	v, e := chartutil.ToRenderValues(h.Chart.Chart, values, chartutil.ReleaseOptions{}, nil)
 	h._chart_values = v
 	if e != nil {
+		log.Error().Err(e).Msg("Render values error")
 		return nil, e
 	}
+	log.Trace().Msg("Rendered values")
 
+	log.Trace().Msg("Render manifests")
 	r, e := _e.Render(h.Chart.Chart, v)
 	if e != nil {
+		log.Error().Err(e).Msg("Render error")
 		return nil, e
 	}
+	log.Trace().Int("manifests", len(r)).Msg("Rendered")
 	m := []any{}
 	for _, v := range r {
 		reader := strings.NewReader(v)
@@ -215,7 +251,9 @@ func (h *HelmTester) Render(values map[string]interface{}) (any, error) {
 			m = append(m, data)
 		}
 	}
+
 	h._rendered = m
+	log.Trace().Int("manifests", len(m)).Msg("Rendered in helper")
 	return m, nil
 }
 
@@ -240,7 +278,7 @@ func (h *HelmTester) Query(query string) (string, error) {
 	if h._rendered == nil {
 		_, e := h.Render(nil)
 		if e != nil {
-			log.Printf("Query render error: %s", e)
+			log.Error().Err(e).Msg("Query render error")
 			return "", e
 		}
 	}
@@ -263,7 +301,7 @@ func (h *HelmTester) Query(query string) (string, error) {
 
 	yamlData, err := yaml.Marshal(data)
 	if err != nil {
-		log.Fatal(err)
+		log.Error().Err(err).Send()
 	}
 
 	_decoder := yqlib.NewYamlDecoder(yqlib.ConfiguredYamlPreferences)
@@ -359,7 +397,7 @@ func (h *HelmTester) YQ(query string, target any, data ...any) error {
 		if h._rendered == nil {
 			_, e := h.Render(nil)
 			if e != nil {
-				log.Printf("Query render error: %s", e)
+				log.Error().Err(e).Msg("Query render error")
 				return e
 			}
 		}
@@ -377,7 +415,7 @@ func (h *HelmTester) YQ(query string, target any, data ...any) error {
 		}
 		yamlBytes, err := yaml.Marshal(yamlData)
 		if err != nil {
-			log.Fatal(err)
+			log.Error().Err(err).Caller().Msg("Failed to marshal data")
 		}
 		data_string = string(yamlBytes)
 	} else if s, ok := data[0].(string); ok {
@@ -385,7 +423,7 @@ func (h *HelmTester) YQ(query string, target any, data ...any) error {
 	} else {
 		yamlBytes, err := yaml.Marshal(data[0])
 		if err != nil {
-			log.Fatal(err)
+			log.Error().Err(err).Send()
 		}
 		data_string = string(yamlBytes)
 
@@ -412,7 +450,7 @@ func (h *HelmTester) YQ(query string, target any, data ...any) error {
 func (h *HelmTester) YQString(query string, data ...any) string {
 	var v string
 	if err := h.YQ(query, &v, data); err != nil {
-		panic(err)
+		log.Error().Err(err).Str("query", query).Msg("Failed to query string")
 	}
 	return v
 }
