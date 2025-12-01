@@ -117,7 +117,11 @@ func NewHelmTester(helm_path string, opts ...Option) (tester *HelmTester, err er
 		tester.ClusterName = kubeconfig.CurrentContext
 	}
 
-	_rest_config, _ := clientcmd.BuildConfigFromFlags("", kubeconfigpath)
+	_rest_config, err := clientcmd.BuildConfigFromFlags("", kubeconfigpath)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to build config")
+		return
+	}
 	tester.restConfig = _rest_config
 	tester.Client, err = kubernetes.NewForConfig(_rest_config)
 	tester.DynamicClient, _ = dynamic.NewForConfig(_rest_config)
@@ -139,8 +143,9 @@ func NewHelmTester(helm_path string, opts ...Option) (tester *HelmTester, err er
 	}
 
 	settings := cli.New()
-	settings.RepositoryCache = filepath.Join(os.TempDir(), "helm-cache")
-	settings.RepositoryConfig = filepath.Join(os.TempDir(), "helm-repo-config")
+	settings.RepositoryCache = filepath.Join(os.TempDir(), "cache")
+	settings.RepositoryConfig = filepath.Join(os.TempDir(), "config")
+	os.MkdirAll(settings.RepositoryCache, 0755)
 	os.MkdirAll(settings.RepositoryConfig, 0755)
 	repoFile := filepath.Join(settings.RepositoryConfig, "repositories.yaml")
 
@@ -156,6 +161,7 @@ func NewHelmTester(helm_path string, opts ...Option) (tester *HelmTester, err er
 		}
 		repoBytes, _ := yaml.Marshal(repoFileContent)
 		os.WriteFile(repoFile, repoBytes, 0644)
+		log.Trace().Str("repositories", repoFile)
 	}
 
 	if !o.SkipDependencyUpdate {
@@ -174,7 +180,7 @@ func NewHelmTester(helm_path string, opts ...Option) (tester *HelmTester, err er
 
 func UpdateDependencies(c *chart.Chart, path string, settings *cli.EnvSettings, skipRepoUpdate bool) (err error) {
 	providers := getter.All(settings)
-	chartYamlPath := filepath.Join(path, "Chart.yaml")
+	// chartYamlPath := filepath.Join(path, "Chart.yaml")
 	//_ := filepath.Join(c.ChartPath(), "Chart.lock")
 	chartsDir := filepath.Join(path, "charts")
 
@@ -187,6 +193,7 @@ func UpdateDependencies(c *chart.Chart, path string, settings *cli.EnvSettings, 
 		if _, err := os.Stat(depPath); os.IsNotExist(err) {
 			allDepsPresent = false
 			log.Info().Msg("Missing dependency: " + dep.Name + " " + dep.Version)
+			AddRepo(dep, settings)
 			break
 		}
 	}
@@ -203,20 +210,52 @@ func UpdateDependencies(c *chart.Chart, path string, settings *cli.EnvSettings, 
 		ChartPath:        path,
 		Out:              out,
 		Getters:          providers,
-		RepositoryConfig: settings.RepositoryConfig,
-		RepositoryCache:  settings.RepositoryCache,
 		SkipUpdate:       skipRepoUpdate,
+		RepositoryConfig: filepath.Join(settings.RepositoryConfig, "repositories.yaml"),
 	}
 
 	log.Trace().Msg("Updating...")
 
-	// manager.Update() will update all repos. We use Build() instead to only download missing dependencies.
+	// // manager.Update() will update all repos. We use Build() instead to only download missing dependencies.
+	// if err = manager.UpdateRepositories(); err != nil {
+	// 	log.Error().Err(err).Msg("Failed to update repositories")
+	// }
 	if err = manager.Build(); err != nil {
-		err = fmt.Errorf("failed to update dependencies for chart %s: %w", chartYamlPath, err)
 		log.Error().Err(err).Msg("Failed to update dependencies")
 	}
 
 	return
+}
+
+func AddRepo(dep *chart.Dependency, settings *cli.EnvSettings) {
+	repoFile := filepath.Join(settings.RepositoryConfig, "repositories.yaml")
+	repoFileContent := &repo.File{}
+
+	if _, err := os.Stat(repoFile); err == nil {
+		repoBytes, err := os.ReadFile(repoFile)
+		if err == nil {
+			yaml.Unmarshal(repoBytes, repoFileContent)
+		}
+	}
+
+	if repoFileContent.APIVersion == "" {
+		repoFileContent.APIVersion = "v1"
+	}
+
+	for _, r := range repoFileContent.Repositories {
+		if r.URL == dep.Repository {
+			log.Trace().Str("repo", dep.Repository).Msg("Repository already exists")
+			return
+		}
+	}
+
+	log.Info().Str("name", dep.Name).Str("url", dep.Repository).Msg("Adding repository")
+	repoFileContent.Repositories = append(repoFileContent.Repositories, &repo.Entry{
+		Name: dep.Name,
+		URL:  dep.Repository,
+	})
+	repoBytes, _ := yaml.Marshal(repoFileContent)
+	os.WriteFile(repoFile, repoBytes, 0644)
 }
 
 func GetDefaultValues(chartPath string) (map[string]interface{}, error) {
