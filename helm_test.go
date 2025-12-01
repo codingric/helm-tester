@@ -37,10 +37,7 @@ func TestNewHelmTesterUpdate(t *testing.T) {
 	})
 }
 
-// func TestNewHelmTesterReal(t *testing.T) {
-// 	h, _ := NewHelmTester("/Users/admzwh5/src/kyverno-controller/helm")
-// 	h.Query(".Manifests")
-// }
+// s
 
 func TestRender(t *testing.T) {
 	ht, _ := NewHelmTester("./helm", WithSkipDependencyUpdate())

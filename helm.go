@@ -27,6 +27,7 @@ import (
 	"helm.sh/helm/v3/pkg/downloader"
 	"helm.sh/helm/v3/pkg/engine"
 	"helm.sh/helm/v3/pkg/getter"
+	"helm.sh/helm/v3/pkg/repo"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -52,6 +53,7 @@ type options struct {
 	SkipDependencyUpdate bool
 	SkipRepoUpdate       bool
 	LogLevel             zerolog.Level
+	Repos                map[string]string
 }
 
 func WithSkipDependencyUpdate() Option {
@@ -72,10 +74,19 @@ func WithLogLevel(level string) Option {
 	}
 }
 
+func WithRepo(name, url string) Option {
+	return func(opt *options) {
+		if opt.Repos == nil {
+			opt.Repos = make(map[string]string)
+		}
+		opt.Repos[name] = url
+	}
+}
+
 func NewHelmTester(helm_path string, opts ...Option) (tester *HelmTester, err error) {
 	tester = &HelmTester{}
 	log.Trace().Msg("NewHelmTester")
-	o := options{LogLevel: zerolog.InfoLevel}
+	o := options{LogLevel: zerolog.InfoLevel, Repos: make(map[string]string)}
 	for _, opt := range opts {
 		opt(&o)
 	}
@@ -127,8 +138,29 @@ func NewHelmTester(helm_path string, opts ...Option) (tester *HelmTester, err er
 		log.Error().Err(err).Str("path", helm_path).Msg("Failed to load Chart")
 	}
 
+	settings := cli.New()
+	settings.RepositoryCache = filepath.Join(os.TempDir(), "helm-cache")
+	settings.RepositoryConfig = filepath.Join(os.TempDir(), "helm-repo-config")
+	os.MkdirAll(settings.RepositoryConfig, 0755)
+	repoFile := filepath.Join(settings.RepositoryConfig, "repositories.yaml")
+
+	if len(o.Repos) > 0 {
+		repoFileContent := repo.File{
+			APIVersion: "v1",
+		}
+		for name, url := range o.Repos {
+			repoFileContent.Repositories = append(repoFileContent.Repositories, &repo.Entry{
+				Name: name,
+				URL:  url,
+			})
+		}
+		repoBytes, _ := yaml.Marshal(repoFileContent)
+		os.WriteFile(repoFile, repoBytes, 0644)
+	}
+
 	if !o.SkipDependencyUpdate {
-		err := UpdateDependencies(c, helm_path, o.SkipRepoUpdate)
+
+		err := UpdateDependencies(c, helm_path, settings, o.SkipRepoUpdate)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to update dependencies")
 		}
@@ -140,11 +172,7 @@ func NewHelmTester(helm_path string, opts ...Option) (tester *HelmTester, err er
 	return
 }
 
-func UpdateDependencies(c *chart.Chart, path string, skipRepoUpdate bool) (err error) {
-	settings := cli.New()
-	settings.RepositoryCache = filepath.Join(os.TempDir(), "helm-cache")
-	settings.RepositoryConfig = filepath.Join(os.TempDir(), "helm-repo")
-	settings.Debug = true
+func UpdateDependencies(c *chart.Chart, path string, settings *cli.EnvSettings, skipRepoUpdate bool) (err error) {
 	providers := getter.All(settings)
 	chartYamlPath := filepath.Join(path, "Chart.yaml")
 	//_ := filepath.Join(c.ChartPath(), "Chart.lock")
@@ -171,15 +199,12 @@ func UpdateDependencies(c *chart.Chart, path string, skipRepoUpdate bool) (err e
 
 	out := io.Discard // Change to &buf if you want to capture the output
 
-	repoFile := filepath.Join(settings.RepositoryConfig)
-	repoCache := filepath.Join(settings.RepositoryCache)
-
 	manager := downloader.Manager{
 		ChartPath:        path,
 		Out:              out,
 		Getters:          providers,
-		RepositoryConfig: repoFile,
-		RepositoryCache:  repoCache,
+		RepositoryConfig: settings.RepositoryConfig,
+		RepositoryCache:  settings.RepositoryCache,
 		SkipUpdate:       skipRepoUpdate,
 	}
 
