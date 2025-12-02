@@ -135,13 +135,6 @@ func NewHelmTester(helm_path string, opts ...Option) (tester *HelmTester, err er
 
 	log.Info().Msg("Current context: " + kubeconfig.CurrentContext)
 
-	// Load Chart
-	log.Trace().Msg("Loading chart")
-	c, err := loader.Load(helm_path)
-	if err != nil {
-		log.Error().Err(err).Str("path", helm_path).Msg("Failed to load Chart")
-	}
-
 	settings := cli.New()
 	settings.RepositoryCache = filepath.Join(os.TempDir(), "cache")
 	settings.RepositoryConfig = filepath.Join(os.TempDir(), "config")
@@ -164,11 +157,23 @@ func NewHelmTester(helm_path string, opts ...Option) (tester *HelmTester, err er
 		log.Trace().Str("repositories", repoFile)
 	}
 
+	// Load Chart
+	log.Trace().Msg("Loading chart")
+	c, err := loader.Load(helm_path)
+	if err != nil {
+		log.Error().Err(err).Str("path", helm_path).Msg("Failed to load Chart")
+	}
+
 	if !o.SkipDependencyUpdate {
 
 		err := UpdateDependencies(c, helm_path, settings, o.SkipRepoUpdate)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to update dependencies")
+		}
+		log.Trace().Msg("Reloading chart")
+		c, err = loader.Load(helm_path)
+		if err != nil {
+			log.Error().Err(err).Str("path", helm_path).Msg("Failed to reload Chart")
 		}
 	} else {
 		log.Info().Msg("Skipping dependencies update.")
@@ -223,7 +228,6 @@ func UpdateDependencies(c *chart.Chart, path string, settings *cli.EnvSettings, 
 	if err = manager.Build(); err != nil {
 		log.Error().Err(err).Msg("Failed to update dependencies")
 	}
-
 	return
 }
 
